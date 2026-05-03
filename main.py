@@ -13,7 +13,9 @@ from gemini_service import ask_gemini, clear_session
 from meta_service import send_message
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel
+from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config
 import logging
+
 
 # Setup logging
 logging.basicConfig(
