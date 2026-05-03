@@ -15,7 +15,8 @@ def _require(key: str, default: str = None) -> str:
 META_ACCESS_TOKEN: str = _require("META_ACCESS_TOKEN")
 VERIFY_TOKEN: str      = _require("VERIFY_TOKEN")
 GEMINI_API_KEY: str    = _require("GEMINI_API_KEY")
-SHEET_ID: str          = _require("SHEET_ID")
+SHEET_ID: str          = os.environ.get("SHEET_ID", "")
+
 
 # PostgreSQL URL on Render, default to SQLite for local development
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./arzonchi.db")

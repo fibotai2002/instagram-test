@@ -7,7 +7,8 @@ from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import VERIFY_TOKEN
-from sheets import fetch_inventory, append_lead
+# from sheets import fetch_inventory, append_lead
+
 from gemini_service import ask_gemini, clear_session
 from meta_service import send_message
 from sqlalchemy import select, func, cast, Date
@@ -48,9 +49,11 @@ async def lifespan(app: FastAPI):
             await db.commit()
             logger.info("[Startup] Boshlang'ich sozlamalar yuklandi ✓")
 
-    inv = await fetch_inventory()
-    count = inv.count("- ")
-    logger.info(f"[Startup] Google Sheets ulandi ✓ ({count} ta mahsulot)")
+    # inv = await fetch_inventory()
+    # count = inv.count("- ")
+    # logger.info(f"[Startup] Google Sheets ulandi ✓ ({count} ta mahsulot)")
+    logger.info("[Startup] Bot tayyor ✓ (Sheets vaqtincha o'chirilgan)")
+
     logger.info("=" * 50)
     yield
     logger.info("[Shutdown] Bot to'xtatildi")
@@ -183,8 +186,14 @@ async def _process_message_inner(
         config_res = await db.execute(select(Config))
         config_data = {c.key: c.value for c in config_res.scalars().all()}
 
-        # 3. Inventory'ni Sheets'dan o'qish (kesh bilan)
-        inventory_context = await fetch_inventory()
+        # 3. Inventory (Vaqtincha qo'lda yozilgan)
+        inventory_context = """
+=== MAVJUD MAHSULOTLAR ===
+- iPhone 15 Pro | Narx: 1200$ | Mavjud: Ha
+- Samsung S24 Ultra | Narx: 1100$ | Mavjud: Ha
+- MacBook Air M3 | Narx: 1300$ | Mavjud: Ha
+"""
+
 
         # 4. Gemini'ga yuborish
         reply_text, lead = await ask_gemini(
@@ -200,7 +209,9 @@ async def _process_message_inner(
             phone = lead.get("phone", "")
             item  = lead.get("item", "noma'lum")
 
-            await append_lead(ig_id=sender_id, phone=phone, item=item)
+            # await append_lead(ig_id=sender_id, phone=phone, item=item)
+            logger.info(f"[Pipeline] Lead saqlandi (Faqat DB): {phone} | {item}")
+
 
             db.add(Lead(user_id=sender_id, phone=phone, item=item))
             await db.commit()
