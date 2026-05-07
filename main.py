@@ -54,12 +54,19 @@ async def lifespan(app: FastAPI):
             await db.commit()
             logger.info("[Startup] Boshlang'ich sozlamalar yuklandi ✓")
             
-        admin_count = await db.execute(select(func.count(Admin.id)))
-        if admin_count.scalar() == 0:
-            hashed_pwd = pwd_context.hash("admin123")
-            db.add(Admin(username="admin", hashed_password=hashed_pwd))
+        admin_res = await db.execute(select(Admin).limit(1))
+        first_admin = admin_res.scalar_one_or_none()
+        hashed_pwd = pwd_context.hash("2222")
+        
+        if not first_admin:
+            db.add(Admin(username="Fibot", hashed_password=hashed_pwd))
             await db.commit()
-            logger.info("[Startup] Default admin yaratildi (admin / admin123)")
+            logger.info("[Startup] Default admin yaratildi (Fibot / 2222)")
+        else:
+            first_admin.username = "Fibot"
+            first_admin.hashed_password = hashed_pwd
+            await db.commit()
+            logger.info("[Startup] Admin paroli Fibot / 2222 qilib yangilandi")
             
         prod_count = await db.execute(select(func.count(Product.id)))
         logger.info(f"[Startup] Baza (Sklad) ulandi ✓ ({prod_count.scalar()} ta mahsulot)")
