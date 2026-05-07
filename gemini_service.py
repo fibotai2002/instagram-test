@@ -169,7 +169,9 @@ Boshqa holatda JSON qaytarma!"""
     except Exception as e:
         logger.error(f"[Gemini] Xato: {e}", exc_info=True)
         _sessions.pop(user_id, None)
-        return "Kechirasiz, hozir texnik muammo bor. Iltimos, bir oz kutib qayta yozing.", None
+        import traceback
+        error_details = traceback.format_exc()
+        return f"Texnik xato haqida ma'lumot (DEBUG): {e}\n\n{error_details[:500]}", None
 
 
 def clear_session(user_id: str) -> None:
