@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,6 +17,8 @@ export const metadata: Metadata = {
   description: "Arzonchi AI Chat boshqaruv paneli",
 };
 
+import ClientLayout from "./ClientLayout";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -26,10 +27,7 @@ export default function RootLayout({
   return (
     <html lang="uz" className="dark">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#050505] text-zinc-100 flex h-screen overflow-hidden`}>
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-8">
-          {children}
-        </main>
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );
