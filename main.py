@@ -6,10 +6,10 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# from sheets import fetch_inventory, append_lead
+from sheets import fetch_inventory, append_lead
 
 from gemini_service import ask_gemini, clear_session
-from manychat_service import send_message
+import telegram_service
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel
 from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config
@@ -50,10 +50,10 @@ async def lifespan(app: FastAPI):
             await db.commit()
             logger.info("[Startup] Boshlang'ich sozlamalar yuklandi ✓")
 
-    # inv = await fetch_inventory()
-    # count = inv.count("- ")
-    # logger.info(f"[Startup] Google Sheets ulandi ✓ ({count} ta mahsulot)")
-    logger.info("[Startup] Bot tayyor ✓ (Sheets vaqtincha o'chirilgan)")
+    inv = await fetch_inventory()
+    count = inv.count("- ")
+    logger.info(f"[Startup] Google Sheets ulandi ✓ ({count} ta mahsulot)")
+    logger.info("[Startup] Bot tayyor ✓")
 
     logger.info("=" * 50)
     yield
@@ -72,52 +72,86 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# POST /manychat — Incoming ManyChat External Request
+# POST /api/chat — Generic endpoint for testing or other frontend
 # ---------------------------------------------------------------------------
 
-class ManyChatWebhook(BaseModel):
-    subscriber_id: str
-    user_text: Optional[str] = None
+class ChatMessage(BaseModel):
+    user_id: str
+    text: Optional[str] = None
     image_url: Optional[str] = None
 
-@app.post("/manychat")
-async def receive_manychat(payload: ManyChatWebhook, background_tasks: BackgroundTasks):
-    logger.info(f"[ManyChat Webhook] Yangi xabar | sender={payload.subscriber_id} | text={repr(payload.user_text)}")
+@app.post("/api/chat")
+async def receive_chat(payload: ChatMessage):
+    logger.info(f"[API Chat] Yangi xabar | sender={payload.user_id} | text={repr(payload.text)}")
     
-    if not payload.user_text and not payload.image_url:
-        logger.debug(f"[ManyChat Webhook] Bo'sh xabar — o'tkazildi | sender={payload.subscriber_id}")
-        return {"status": "ignored"}
+    if not payload.text and not payload.image_url:
+        return {"status": "ignored", "reply": ""}
 
-    background_tasks.add_task(
-        process_message,
-        sender_id=payload.subscriber_id,
-        user_text=payload.user_text,
+    reply_text = await _process_message_inner(
+        sender_id=payload.user_id,
+        user_text=payload.text,
         image_url=payload.image_url,
     )
 
+    return {"status": "ok", "reply": reply_text}
+
+
+# ---------------------------------------------------------------------------
+# POST /telegram/webhook — Incoming Telegram Request
+# ---------------------------------------------------------------------------
+
+@app.post("/telegram/webhook")
+async def receive_telegram(request: Request, background_tasks: BackgroundTasks):
+    data = await request.json()
+    logger.info(f"[Telegram Webhook] Yangi update: {data.get('update_id')}")
+
+    if "message" not in data:
+        return {"status": "ok"}
+
+    msg = data["message"]
+    chat_id = str(msg["chat"]["id"])
+    text = msg.get("text", "")
+    
+    # Rasm kelgan bo'lsa
+    image_url = None
+    if "photo" in msg:
+        # Eng katta rasmni olish (oxirgisi)
+        photo_id = msg["photo"][-1]["file_id"]
+        image_url = await telegram_service.get_file_url(photo_id)
+        if not text:
+            text = msg.get("caption", "")
+
+    if not text and not image_url:
+        return {"status": "ignored"}
+
+    # Telegram uchun orqa fonda ishlash kerak, aks holda telegram qayta-qayta jo'natadi
+    background_tasks.add_task(
+        process_telegram_message,
+        sender_id=chat_id,
+        user_text=text,
+        image_url=image_url
+    )
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# Background pipeline
-# ---------------------------------------------------------------------------
-
-async def process_message(
-    sender_id: str,
-    user_text: Optional[str],
-    image_url: Optional[str],
-) -> None:
+async def process_telegram_message(sender_id: str, user_text: str, image_url: str):
     try:
-        await _process_message_inner(sender_id, user_text, image_url)
+        reply_text = await _process_message_inner(sender_id, user_text, image_url)
+        if reply_text:
+            await telegram_service.send_message(sender_id, reply_text)
     except Exception as e:
-        logger.error(f"[Pipeline] ✗ Kritik xato ({sender_id}): {e}", exc_info=True)
+        logger.error(f"[Telegram Pipeline] Xato: {e}", exc_info=True)
 
+
+# ---------------------------------------------------------------------------
+# Background pipeline (Core)
+# ---------------------------------------------------------------------------
 
 async def _process_message_inner(
     sender_id: str,
     user_text: Optional[str],
     image_url: Optional[str],
-) -> None:
+) -> str:
     logger.info(f"[Pipeline] ▶ Boshlandi -> {sender_id}")
 
     async with AsyncSessionLocal() as db:
@@ -139,45 +173,45 @@ async def _process_message_inner(
         config_res = await db.execute(select(Config))
         config_data = {c.key: c.value for c in config_res.scalars().all()}
 
-        # 3. Inventory (Vaqtincha qo'lda yozilgan)
-        inventory_context = """
-=== MAVJUD MAHSULOTLAR ===
-- iPhone 15 Pro | Narx: 1200$ | Mavjud: Ha
-- Samsung S24 Ultra | Narx: 1100$ | Mavjud: Ha
-- MacBook Air M3 | Narx: 1300$ | Mavjud: Ha
-"""
+        # 3. Oldingi xabarlar tarixini olish (oxirgi 10 ta)
+        history_stmt = select(MessageLog).where(MessageLog.user_id == sender_id).order_by(MessageLog.id.desc()).limit(10)
+        history_res = await db.execute(history_stmt)
+        history_logs = list(reversed(history_res.scalars().all()))
+        chat_history = [{"role": log.role, "content": log.content} for log in history_logs]
 
+        # 4. Inventory (Google Sheets orqali)
+        inventory_context = await fetch_inventory()
 
-        # 4. Gemini'ga yuborish
+        # 5. Gemini'ga yuborish
         reply_text, lead = await ask_gemini(
             user_id=sender_id,
             user_text=user_text,
             image_url=image_url,
             inventory_context=inventory_context,
             config=config_data,
+            chat_history=chat_history
         )
 
-        # 5. Lead topilgan bo'lsa — Sheets'ga va DB'ga yozish
+        # 6. Lead topilgan bo'lsa — Sheets'ga va DB'ga yozish
         if lead and lead.get("lead_captured"):
             phone = lead.get("phone", "")
             item  = lead.get("item", "noma'lum")
 
-            # await append_lead(ig_id=sender_id, phone=phone, item=item)
-            logger.info(f"[Pipeline] Lead saqlandi (Faqat DB): {phone} | {item}")
-
+            await append_lead(ig_id=sender_id, phone=phone, item=item)
+            logger.info(f"[Pipeline] Lead saqlandi (DB va Sheets): {phone} | {item}")
 
             db.add(Lead(user_id=sender_id, phone=phone, item=item))
             await db.commit()
 
             clear_session(sender_id)
 
-        # 6. Javobni log qilish va yuborish
+        # 7. Javobni log qilish va yuborish
         if reply_text:
             db.add(MessageLog(user_id=sender_id, role="assistant", content=reply_text))
             await db.commit()
-            await send_message(recipient_id=sender_id, text=reply_text)
 
     logger.info(f"[Pipeline] ✓ Yakunlandi -> {sender_id}")
+    return reply_text or ""
 
 
 # ---------------------------------------------------------------------------

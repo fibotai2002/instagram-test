@@ -25,27 +25,40 @@ def _get_model(system_instruction: str):
 _sessions: Dict[str, genai.ChatSession] = {}
 _last_instruction: Dict[str, str] = {}
 
-def _get_session(user_id: str, system_instruction: str) -> genai.ChatSession:
+def _get_session(user_id: str, system_instruction: str, db_history: list) -> genai.ChatSession:
     if user_id not in _sessions or _last_instruction.get(user_id) != system_instruction:
         model = _get_model(system_instruction)
-        _sessions[user_id] = model.start_chat(history=[])
+        
+        gemini_history = []
+        for log in db_history:
+            # Gemini faqat 'user' va 'model' rollarini qabul qiladi
+            role = "user" if log["role"] == "user" else "model"
+            # Agar kontent bo'lmasa, uni qo'shmaslik kerak
+            if log["content"]:
+                gemini_history.append({"role": role, "parts": [log["content"]]})
+
+        _sessions[user_id] = model.start_chat(history=gemini_history)
         _last_instruction[user_id] = system_instruction
-        logger.info(f"[Gemini] Yangi sessiya: {user_id}")
+        logger.info(f"[Gemini] Yangi sessiya (Tarix: {len(gemini_history)} ta xabar): {user_id}")
     return _sessions[user_id]
 
 
 def _parse_lead(text: str) -> Tuple[Optional[Dict], str]:
     """Extract JSON lead block from response. Returns (lead_dict, clean_text)."""
-    pattern = r'\{\s*"lead_captured"\s*:\s*true.*?\}'
-    match = re.search(pattern, text, re.DOTALL)
+    # Regex: Ochiq qavsdan boshlab oxirgi qavsgacha yoki markdown bo'lsa uni ushlash
+    pattern = r'\{[\s\S]*?"lead_captured"\s*:\s*true[\s\S]*?\}'
+    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if not match:
         return None, text
+    
+    json_str = match.group(0)
     try:
-        lead = json.loads(match.group())
-        clean_text = text[: match.start()].rstrip()
+        lead = json.loads(json_str)
+        # JSON'ni va markdown qoldiqlarini o'chirish (masalan: ```json, ```)
+        clean_text = text.replace(json_str, "").replace("```json", "").replace("```", "").strip()
         return lead, clean_text
     except json.JSONDecodeError:
-        logger.error(f"[Gemini] JSON parse xatosi: {match.group()}")
+        logger.error(f"[Gemini] JSON parse xatosi: {json_str}")
         return None, text
 
 
@@ -66,29 +79,32 @@ async def ask_gemini(
     image_url: Optional[str],
     inventory_context: str,
     config: dict,
+    chat_history: list = None,
 ) -> Tuple[str, Optional[dict]]:
     """Send user message to Gemini with dynamic system prompt."""
+    if chat_history is None:
+        chat_history = []
+        
     shop_name = config.get("shop_name", "Do'kon")
-    tone = config.get("bot_tone", "Do'stona")
+    tone = config.get("bot_tone", "G'amxo'r, do'stona va lunda")
     delivery = config.get("delivery_info", "Mavjud")
     lang = config.get("language", "O'zbek")
 
-    dynamic_prompt = f"""Sen "{shop_name}" do'konining xodimi Sardorsan.
-Suhbat uslubing: {tone}. Insondek gapir, AI ekanligingni aytma.
-Javoblaring qisqa, lunda va samimiy bo'lsin.
-Til: {lang}.
-Yetkazib berish: {delivery}.
+    dynamic_prompt = f"""Sen "{shop_name}" do'konining tajribali, g'amxo'r va xushmuomala xodimisan.
+Suhbat uslubing: {tone}. Mijoz bilan Instagram/Telegram kabi ijtimoiy tarmoqda yozishayapsan.
+Aslo AI yoki bot ekanligingni aytma, inson xodimdek harakat qil.
+Til: {lang}. Yetkazib berish: {delivery}.
 
 Qoidalaring:
-1. Insondek tabiiy salomlash.
-2. FAQAT [Inventory Context] asosida javob ber. Agar ma'lumot bo'lmasa, muloyimlik bilan tushuntir.
-3. Uzun matnlar yozma, xuddi messenjerda yozishayotgandek qisqa javob ber.
-4. Foydalanuvchi rasm yuborsa, unga e'tibor ber va inventar bilan solishtir.
-5. Telefon raqam bersa, javob oxiriga FAQAT ushbu JSONni qo'sh:
+1. QISQA VA LUNDA Yoz! Uzun xatboshilar va keraksiz jumlalardan qoch. Har bir xabar 1-2 gapdan iborat bo'lsin.
+2. Empoatiya va Tabiiylik: Joyida munosib emojilardan foydalan (😊, ✅, 🚚). Quruq javob o'rniga muloyim gapir.
+3. INVENTAR (Baza): FAQAT [Inventory Context] asosida javob ber. Mijoz nima xohlayotganini qiziqib so'ra (qaysi rangi, xotirasi...).
+4. LEAD YIG'ISH (Tabiiy): To'g'ridan-to'g'ri raqam so'rama! Mahsulot haqida ma'lumot berib, keyin tabiiy tarzda: "Buyurtma berish uchun yoki menejerimiz bog'lanishi uchun raqamingizni yozib qoldirishingiz mumkin" deb taklif qil.
+5. JSON QAYTARISH: QACHONKI mijoz o'z telefon raqamini yozsa (+998 bilan yoki boshqa formatda), javobingning eng oxiriga FAQAT quyidagi JSON'ni qo'sh.
 {{"lead_captured": true, "phone": "+998XXXXXXXXX", "item": "mahsulot_nomi"}}
-"""
+Boshqa holatda JSON qaytarma!"""
 
-    session = _get_session(user_id, dynamic_prompt)
+    session = _get_session(user_id, dynamic_prompt, db_history=chat_history)
 
     message_text = (
         f"[Inventory Context]\n{inventory_context}\n\n"

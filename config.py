@@ -12,10 +12,9 @@ def _require(key: str, default: str = None) -> str:
     return value
 
 
-MANYCHAT_API_TOKEN: str = _require("MANYCHAT_API_TOKEN")
 GEMINI_API_KEY: str    = _require("GEMINI_API_KEY")
 SHEET_ID: str          = os.environ.get("SHEET_ID", "")
-
+TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 # PostgreSQL URL on Render, default to SQLite for local development
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./arzonchi.db")
