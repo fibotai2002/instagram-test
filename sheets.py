@@ -42,7 +42,7 @@ def _fetch_inventory_sync() -> str:
     ws = _get_worksheet("Inventory")
     rows = ws.get_all_records()
     if not rows:
-        return "Hozirda inventarizatsiya bo'sh."
+        return ""
 
     lines = ["=== MAVJUD MAHSULOTLAR ==="]
     for row in rows:
@@ -88,13 +88,13 @@ async def fetch_inventory(force_refresh: bool = False) -> str:
         return result
     except FileNotFoundError:
         print("[Sheets] credentials.json topilmadi!")
-        return "Inventory yuklab bo'lmadi (credentials.json yo'q)."
+        return ""
     except gspread.exceptions.SpreadsheetNotFound:
         print("[Sheets] Google Sheet topilmadi. SHEET_ID ni tekshiring.")
-        return "Inventory yuklab bo'lmadi (Sheet topilmadi)."
+        return ""
     except Exception as e:
         print(f"[Sheets] Inventory xato: {e}")
-        return _inventory_cache or "Inventory yuklab bo'lmadi."
+        return _inventory_cache or ""
 
 
 async def append_lead(ig_id: str, phone: str, item: str) -> None:
