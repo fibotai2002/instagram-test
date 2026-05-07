@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Plus, Edit2, Trash2 } from "lucide-react";
 
 type Product = {
   id: number;
@@ -80,9 +81,10 @@ export default function ProductsPage() {
         <h1 className="text-2xl font-bold text-white">Sklad (Mahsulotlar)</h1>
         <button
           onClick={() => openModal()}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
         >
-          + Yangi qo'shish
+          <Plus size={16} />
+          Yangi qo'shish
         </button>
       </div>
 
@@ -105,9 +107,13 @@ export default function ProductsPage() {
                 <p className="truncate"><span className="text-zinc-500">Sifati:</span> {p.specs}</p>
               </div>
             </div>
-            <div className="p-4 border-t border-zinc-800 flex justify-end space-x-2">
-              <button onClick={() => openModal(p)} className="text-blue-400 hover:text-blue-300 text-sm">Tahrirlash</button>
-              <button onClick={() => handleDelete(p.id)} className="text-red-400 hover:text-red-300 text-sm">O'chirish</button>
+            <div className="p-4 border-t border-zinc-800 flex justify-end space-x-3">
+              <button onClick={() => openModal(p)} className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm transition">
+                <Edit2 size={14} /> Tahrirlash
+              </button>
+              <button onClick={() => handleDelete(p.id)} className="flex items-center gap-1 text-red-400 hover:text-red-300 text-sm transition">
+                <Trash2 size={14} /> O'chirish
+              </button>
             </div>
           </div>
         ))}

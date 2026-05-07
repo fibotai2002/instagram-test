@@ -7,6 +7,7 @@ import {
   Users,
   UserPlus,
   Settings,
+  Package,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -17,6 +18,7 @@ function cn(...inputs: ClassValue[]) {
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
+  { icon: Package,         label: 'Sklad (Products)', href: '/products' },
   { icon: UserPlus,        label: 'Leadlar',   href: '/leads' },
   { icon: Users,           label: 'Foydalanuvchilar', href: '/users' },
   { icon: Settings,        label: 'Sozlamalar', href: '/settings' },
