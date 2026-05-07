@@ -164,20 +164,20 @@ async def _process_message_inner(
             db.add(user)
             await db.commit()
 
-        # 1. Foydalanuvchi xabarini log qilish
-        if user_text:
-            db.add(MessageLog(user_id=sender_id, role="user", content=user_text))
-            await db.commit()
-
-        # 2. Sozlamalarni bazadan olish
-        config_res = await db.execute(select(Config))
-        config_data = {c.key: c.value for c in config_res.scalars().all()}
-
-        # 3. Oldingi xabarlar tarixini olish (oxirgi 10 ta)
+        # 1. Oldingi xabarlar tarixini olish (oxirgi 10 ta)
         history_stmt = select(MessageLog).where(MessageLog.user_id == sender_id).order_by(MessageLog.id.desc()).limit(10)
         history_res = await db.execute(history_stmt)
         history_logs = list(reversed(history_res.scalars().all()))
         chat_history = [{"role": log.role, "content": log.content} for log in history_logs]
+
+        # 2. Foydalanuvchi joriy xabarini bazaga saqlash
+        if user_text:
+            db.add(MessageLog(user_id=sender_id, role="user", content=user_text))
+            await db.commit()
+
+        # 3. Sozlamalarni bazadan olish
+        config_res = await db.execute(select(Config))
+        config_data = {c.key: c.value for c in config_res.scalars().all()}
 
         # 4. Inventory (Google Sheets orqali)
         inventory_context = await fetch_inventory()

@@ -25,17 +25,49 @@ def _get_model(system_instruction: str):
 _sessions: Dict[str, genai.ChatSession] = {}
 _last_instruction: Dict[str, str] = {}
 
+def _format_history(db_history: list) -> list:
+    if not db_history:
+        return []
+        
+    logs = []
+    for log in db_history:
+        role = "user" if log["role"] == "user" else "model"
+        content = log["content"].strip() if log["content"] else ""
+        if content:
+            logs.append({"role": role, "content": content})
+            
+    if not logs:
+        return []
+        
+    merged = []
+    current_role = logs[0]["role"]
+    current_content = [logs[0]["content"]]
+    
+    for log in logs[1:]:
+        if log["role"] == current_role:
+            current_content.append(log["content"])
+        else:
+            merged.append({"role": current_role, "parts": ["\n\n".join(current_content)]})
+            current_role = log["role"]
+            current_content = [log["content"]]
+            
+    merged.append({"role": current_role, "parts": ["\n\n".join(current_content)]})
+    
+    # Gemini history must start with 'user' (optional, but safer)
+    if merged and merged[0]["role"] == "model":
+        merged.pop(0)
+        
+    # Gemini history must NOT end with 'user' because we are about to send a 'user' message
+    if merged and merged[-1]["role"] == "user":
+        merged.pop()
+        
+    return merged
+
 def _get_session(user_id: str, system_instruction: str, db_history: list) -> genai.ChatSession:
     if user_id not in _sessions or _last_instruction.get(user_id) != system_instruction:
         model = _get_model(system_instruction)
         
-        gemini_history = []
-        for log in db_history:
-            # Gemini faqat 'user' va 'model' rollarini qabul qiladi
-            role = "user" if log["role"] == "user" else "model"
-            # Agar kontent bo'lmasa, uni qo'shmaslik kerak
-            if log["content"]:
-                gemini_history.append({"role": role, "parts": [log["content"]]})
+        gemini_history = _format_history(db_history)
 
         _sessions[user_id] = model.start_chat(history=gemini_history)
         _last_instruction[user_id] = system_instruction
