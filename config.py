@@ -12,8 +12,7 @@ def _require(key: str, default: str = None) -> str:
     return value
 
 
-META_ACCESS_TOKEN: str = _require("META_ACCESS_TOKEN")
-VERIFY_TOKEN: str      = _require("VERIFY_TOKEN")
+MANYCHAT_API_TOKEN: str = _require("MANYCHAT_API_TOKEN")
 GEMINI_API_KEY: str    = _require("GEMINI_API_KEY")
 SHEET_ID: str          = os.environ.get("SHEET_ID", "")
 
@@ -24,6 +23,6 @@ DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./arzonc
 # Google Credentials from JSON string (Env Var)
 GOOGLE_CREDENTIALS_JSON: str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
-META_API_URL     = "https://graph.facebook.com/v19.0/me/messages"
+MANYCHAT_API_URL = "https://api.manychat.com/fb/sending/sendContent"
 CREDENTIALS_FILE = "credentials.json"
 

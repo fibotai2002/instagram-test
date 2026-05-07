@@ -6,11 +6,10 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import VERIFY_TOKEN
 # from sheets import fetch_inventory, append_lead
 
 from gemini_service import ask_gemini, clear_session
-from meta_service import send_message
+from manychat_service import send_message
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel
 from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config
@@ -73,76 +72,28 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# GET /webhook — Meta verification
+# POST /manychat — Incoming ManyChat External Request
 # ---------------------------------------------------------------------------
 
-@app.get("/webhook", response_class=PlainTextResponse)
-async def verify_webhook(request: Request) -> PlainTextResponse:
-    params    = request.query_params
-    mode      = params.get("hub.mode")
-    token     = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
+class ManyChatWebhook(BaseModel):
+    subscriber_id: str
+    user_text: Optional[str] = None
+    image_url: Optional[str] = None
 
-    logger.info(f"[Webhook] Verification so'rovi | mode={mode}")
-
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        logger.info("[Webhook] ✓ Muvaffaqiyatli tasdiqlandi")
-        return PlainTextResponse(content=challenge, status_code=200)
-
-    logger.warning("[Webhook] ✗ Noto'g'ri token")
-    raise HTTPException(status_code=403, detail="Forbidden")
-
-
-# ---------------------------------------------------------------------------
-# POST /webhook — Incoming Instagram messages
-# ---------------------------------------------------------------------------
-
-@app.post("/webhook")
-async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    if body.get("object") != "instagram":
-        logger.debug(f"[Webhook] Noma'lum object: {body.get('object')} — o'tkazib yuborildi")
+@app.post("/manychat")
+async def receive_manychat(payload: ManyChatWebhook, background_tasks: BackgroundTasks):
+    logger.info(f"[ManyChat Webhook] Yangi xabar | sender={payload.subscriber_id} | text={repr(payload.user_text)}")
+    
+    if not payload.user_text and not payload.image_url:
+        logger.debug(f"[ManyChat Webhook] Bo'sh xabar — o'tkazildi | sender={payload.subscriber_id}")
         return {"status": "ignored"}
 
-    for entry in body.get("entry", []):
-        for messaging in entry.get("messaging", []):
-
-            message = messaging.get("message", {})
-            if not message or message.get("is_echo"):
-                continue
-
-            sender_id: str = messaging.get("sender", {}).get("id", "")
-            if not sender_id:
-                continue
-
-            user_text: str | None = message.get("text")
-            image_url: str | None = None
-
-            for att in message.get("attachments", []):
-                if att.get("type") == "image":
-                    image_url = att.get("payload", {}).get("url")
-                    logger.info(f"[Webhook] Rasm topildi: {image_url[:60]}...")
-                    break
-
-            if not user_text and not image_url:
-                logger.debug(f"[Webhook] Bo'sh xabar — o'tkazildi | sender={sender_id}")
-                continue
-
-            logger.info(
-                f"[Webhook] Yangi xabar | sender={sender_id} | "
-                f"text={repr(user_text)} | rasm={'ha' if image_url else 'yoq'}"
-            )
-
-            background_tasks.add_task(
-                process_message,
-                sender_id=sender_id,
-                user_text=user_text,
-                image_url=image_url,
-            )
+    background_tasks.add_task(
+        process_message,
+        sender_id=payload.subscriber_id,
+        user_text=payload.user_text,
+        image_url=payload.image_url,
+    )
 
     return {"status": "ok"}
 
