@@ -10,8 +10,14 @@ from gemini_service import ask_gemini, clear_session
 import telegram_service
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel
-from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config, Product
+from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config, Product, Admin
 import logging
+import jwt
+import datetime
+from passlib.context import CryptContext
+
+SECRET_KEY = "arzonchi_super_secret_key_2026"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # Setup logging
@@ -45,9 +51,15 @@ async def lifespan(app: FastAPI):
                 Config(key="language", value="O'zbek"),
             ]
             db.add_all(defaults)
-            db.add_all(defaults)
             await db.commit()
             logger.info("[Startup] Boshlang'ich sozlamalar yuklandi ✓")
+            
+        admin_count = await db.execute(select(func.count(Admin.id)))
+        if admin_count.scalar() == 0:
+            hashed_pwd = pwd_context.hash("admin123")
+            db.add(Admin(username="admin", hashed_password=hashed_pwd))
+            await db.commit()
+            logger.info("[Startup] Default admin yaratildi (admin / admin123)")
             
         prod_count = await db.execute(select(func.count(Product.id)))
         logger.info(f"[Startup] Baza (Sklad) ulandi ✓ ({prod_count.scalar()} ta mahsulot)")
@@ -234,6 +246,25 @@ async def _process_message_inner(
 # ---------------------------------------------------------------------------
 # Dashboard Models & API Endpoints
 # ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/admin/login")
+async def admin_login(req: LoginRequest):
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(select(Admin).where(Admin.username == req.username))
+        admin = res.scalar_one_or_none()
+        if not admin or not pwd_context.verify(req.password, admin.hashed_password):
+            raise HTTPException(status_code=401, detail="Noto'g'ri login yoki parol")
+            
+        token = jwt.encode(
+            {"sub": admin.username, "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)},
+            SECRET_KEY,
+            algorithm="HS256"
+        )
+        return {"token": token}
 
 class ProductCreate(BaseModel):
     name: str
