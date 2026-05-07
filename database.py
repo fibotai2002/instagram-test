@@ -38,8 +38,26 @@ class Lead(Base):
     user_id = Column(String, ForeignKey("users.id"))
     phone = Column(String)
     item = Column(String)
+    source = Column(String, default="telegram") # telegram or instagram
     status = Column(String, default="yangi")  # yangi, qo'ng'iroq_qilindi, yakunlandi
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
+
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    category = Column(String, default="Boshqa")
+    price = Column(String, default="")
+    stock = Column(Integer, default=0)
+    specs = Column(Text, default="")
+    image_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
+
+class Admin(Base):
+    __tablename__ = "admins"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
 
 class Config(Base):
     __tablename__ = "config"

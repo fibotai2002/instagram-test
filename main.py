@@ -6,13 +6,11 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from sheets import fetch_inventory, append_lead
-
 from gemini_service import ask_gemini, clear_session
 import telegram_service
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel
-from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config
+from database import init_db, AsyncSessionLocal, User, MessageLog, Lead, Config, Product
 import logging
 
 
@@ -47,12 +45,13 @@ async def lifespan(app: FastAPI):
                 Config(key="language", value="O'zbek"),
             ]
             db.add_all(defaults)
+            db.add_all(defaults)
             await db.commit()
             logger.info("[Startup] Boshlang'ich sozlamalar yuklandi ✓")
+            
+        prod_count = await db.execute(select(func.count(Product.id)))
+        logger.info(f"[Startup] Baza (Sklad) ulandi ✓ ({prod_count.scalar()} ta mahsulot)")
 
-    inv = await fetch_inventory()
-    count = inv.count("- ")
-    logger.info(f"[Startup] Google Sheets ulandi ✓ ({count} ta mahsulot)")
     logger.info("[Startup] Bot tayyor ✓")
 
     logger.info("=" * 50)
@@ -147,6 +146,22 @@ async def process_telegram_message(sender_id: str, user_text: str, image_url: st
 # Background pipeline (Core)
 # ---------------------------------------------------------------------------
 
+async def fetch_inventory_db(db) -> str:
+    stmt = select(Product).order_by(Product.id)
+    result = await db.execute(stmt)
+    products = result.scalars().all()
+    if not products:
+        return ""
+    
+    lines = ["=== MAVJUD MAHSULOTLAR ==="]
+    for p in products:
+        lines.append(
+            f"- {p.name} | Kategoriya: {p.category} | Narx: {p.price} | "
+            f"Mavjudligi: {p.stock} ta | Xususiyatlar: {p.specs}"
+        )
+    return "\n".join(lines)
+
+
 async def _process_message_inner(
     sender_id: str,
     user_text: Optional[str],
@@ -179,8 +194,8 @@ async def _process_message_inner(
         config_res = await db.execute(select(Config))
         config_data = {c.key: c.value for c in config_res.scalars().all()}
 
-        # 4. Inventory (Google Sheets orqali)
-        inventory_context = await fetch_inventory()
+        # 4. Inventory (Baza orqali)
+        inventory_context = await fetch_inventory_db(db)
 
         # 5. Gemini'ga yuborish
         reply_text, lead = await ask_gemini(
@@ -192,15 +207,17 @@ async def _process_message_inner(
             chat_history=chat_history
         )
 
-        # 6. Lead topilgan bo'lsa — Sheets'ga va DB'ga yozish
+        # 6. Lead topilgan bo'lsa — DB'ga yozish
         if lead and lead.get("lead_captured"):
             phone = lead.get("phone", "")
             item  = lead.get("item", "noma'lum")
+            
+            # Telegram webhookdan kelganda source "telegram" bo'ladi, aks holda default
+            source = "telegram" 
 
-            await append_lead(ig_id=sender_id, phone=phone, item=item)
-            logger.info(f"[Pipeline] Lead saqlandi (DB va Sheets): {phone} | {item}")
+            logger.info(f"[Pipeline] Lead saqlandi (DB): {phone} | {item}")
 
-            db.add(Lead(user_id=sender_id, phone=phone, item=item))
+            db.add(Lead(user_id=sender_id, phone=phone, item=item, source=source))
             await db.commit()
 
             clear_session(sender_id)
@@ -217,6 +234,17 @@ async def _process_message_inner(
 # ---------------------------------------------------------------------------
 # Dashboard Models & API Endpoints
 # ---------------------------------------------------------------------------
+
+class ProductCreate(BaseModel):
+    name: str
+    category: str = "Boshqa"
+    price: str = ""
+    stock: int = 0
+    specs: str = ""
+    image_url: Optional[str] = None
+
+class ProductUpdate(ProductCreate):
+    pass
 
 class LeadUpdate(BaseModel):
     status: str
@@ -260,6 +288,44 @@ async def health_check():
     except Exception:
         db_ok = False
     return {"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "error"}
+
+
+@app.get("/api/products")
+async def get_products():
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Product).order_by(Product.id.desc()))
+        return result.scalars().all()
+
+@app.post("/api/products")
+async def create_product(data: ProductCreate):
+    async with AsyncSessionLocal() as db:
+        new_prod = Product(**data.model_dump())
+        db.add(new_prod)
+        await db.commit()
+        await db.refresh(new_prod)
+        return new_prod
+
+@app.put("/api/products/{prod_id}")
+async def update_product(prod_id: int, data: ProductUpdate):
+    async with AsyncSessionLocal() as db:
+        prod = await db.get(Product, prod_id)
+        if not prod:
+            raise HTTPException(status_code=404, detail="Mahsulot topilmadi")
+        for k, v in data.model_dump().items():
+            setattr(prod, k, v)
+        await db.commit()
+        await db.refresh(prod)
+        return prod
+
+@app.delete("/api/products/{prod_id}")
+async def delete_product(prod_id: int):
+    async with AsyncSessionLocal() as db:
+        prod = await db.get(Product, prod_id)
+        if not prod:
+            raise HTTPException(status_code=404, detail="Mahsulot topilmadi")
+        await db.delete(prod)
+        await db.commit()
+        return {"status": "deleted"}
 
 
 @app.get("/api/leads")
