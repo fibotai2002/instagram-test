@@ -17,7 +17,7 @@ logger = logging.getLogger("arzonchi-bot.gemini")
 
 def _get_model(system_instruction: str):
     return genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-2.5-flash",
         system_instruction=system_instruction,
     )
 
